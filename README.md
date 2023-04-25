@@ -1,7 +1,6 @@
 # Project #6: SVSFS
 
-> This is a shared repository for the final project in the Operating Systems class. 
-> This project is co-authored: **Santiago Rodríguez** & **José Benítez**. 
+>  **Santiago Rodríguez** and **José Benítez** are co-authors of the final project in the Operating Systems class, which is stored in this shared repository.
 
 ## The goals of this project:
 - Learn about the data structures and implementation of a Unix-like filesystem.
