@@ -1,7 +1,6 @@
 # Project #6: SVSFS
 
 > This is a shared repository for the final project in the Operating Systems class. 
-
 > This project is co-authored: **Santiago Rodríguez** & **José Benítez**. 
 
 ## The goals of this project:
