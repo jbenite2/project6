@@ -2,7 +2,7 @@
 
 This is a shared repository for the final project in the Operating Systems class. 
 
-This project is co-authored: Santiago Rodríguez & José Benítez. 
+This project is co-authored: **Santiago Rodríguez** & **José Benítez**. 
 
 The goals of this project:
 - Learn about the data structures and implementation of a Unix-like filesystem.
