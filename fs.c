@@ -1,27 +1,21 @@
-/*
- * SVSFS - a close copy of D. Thain's SimpleFS.
- * PJF 4/2023
- * original comments below
- * Implementation of SimpleFS.
- * Make your changes here.
- *
- * dont forget about externs
- */
-
 #include "fs.h"
 #include "disk.h"
-
+#include "disk.c"
 #include <stdint.h>
 #include <stdio.h>
-
-extern struct disk *thedisk;
-int is_mounted = 0;
-int *free_bit_map = NULL;
+#include <stdlib.h>
+#include <string.h>
 
 #define FS_MAGIC 0x34341023
 #define INODES_PER_BLOCK 128
 #define POINTERS_PER_INODE 3
 #define POINTERS_PER_BLOCK 1024
+
+// Global Variables
+union fs_block *svsfs = NULL;
+extern struct disk *thedisk;
+int is_mounted = 0;
+int *free_bit_map = NULL;
 
 struct fs_superblock
 {
@@ -48,8 +42,6 @@ union fs_block
 	unsigned char data[BLOCK_SIZE];
 };
 
-union fs_block *svsfs = NULL;
-
 int fs_format()
 {
 	/**
@@ -66,21 +58,22 @@ int fs_format()
 
 	if (svsfs)
 	{
-		for (int i = 0; i < svsfs[0]->super.nblocks; i++)
+		for (int i = 0; i < svsfs[0].super.nblocks; i++)
 		{
-			if (!svsfs[i])
+			if (&svsfs[i] == NULL)
 			{
 				continue;
 			}
-			free(svsfs[i]);
+			free(&svsfs[i]);
 		}
 		// free the fs
 		free(svsfs);
 	}
+	printf("This is the blocks in the disk: %d", thedisk->nblocks);
 	svsfs = (union fs_block *)malloc(sizeof(union fs_block) * thedisk->nblocks);
 	if (!svsfs)
 	{
-		exit(1);
+		return 0;
 	}
 
 	int n_inodes_blocks = thedisk->nblocks / 10;
@@ -88,21 +81,24 @@ int fs_format()
 	union fs_block *superblock_temp = malloc(sizeof(union fs_block));
 	if (!superblock_temp)
 	{
-		exit(1);
+		return 0;
 	}
 	superblock_temp->super.magic = FS_MAGIC;
 	superblock_temp->super.nblocks = thedisk->nblocks;
 	superblock_temp->super.ninodeblocks = n_inodes_blocks;
 	superblock_temp->super.ninodes = n_inodes_blocks * INODES_PER_BLOCK;
 	svsfs[0] = *superblock_temp;
-	for (int i = 1; i < n_inodes_blocks; i++)
+	free(superblock_temp);
+	for (int i = 1; i <= n_inodes_blocks; i++)
 	{
 		union fs_block *inode_block_temp = malloc(sizeof(union fs_block));
 		if (!inode_block_temp)
 		{
-			exit(1);
+			return 0;
 		}
+		memset(inode_block_temp, 0, sizeof(union fs_block));
 		svsfs[i] = *inode_block_temp;
+		free(inode_block_temp);
 	}
 
 	return 1;
@@ -130,23 +126,23 @@ int fs_mount()
 	build a free block bitmap, and prepare the filesystem for use. Return one on success, zero otherwise.
 	A successful mount is a pre-requisite for the remaining calls.
 	**/
-	if (!svsfs || svsfs[0]->super.magic != FS_MAGIC)
+	if (!svsfs || svsfs[0].super.magic != FS_MAGIC)
 	{
 		return 0;
 	}
-	free_bit_map = (int *)malloc(sizeof(int) * svsfs[0]->super.nblocks);
+	free_bit_map = (int *)malloc(sizeof(int) * svsfs[0].super.nblocks);
 	if (!free_bit_map)
 	{
 		exit(1);
 	}
-	for (int i = 0; i < svsfs[0]->super.nblocks; i++)
+	for (int i = 0; i < svsfs[0].super.nblocks; i++)
 	{
 		free_bit_map[i] = 0;
 	}
 
 	is_mounted = 1 == 1;
 
-	return 1;
+	return 0;
 }
 
 int fs_create()
