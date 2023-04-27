@@ -89,6 +89,7 @@ int fs_format()
 	superblock_temp->super.ninodes = n_inodes_blocks * INODES_PER_BLOCK;
 	svsfs[0] = *superblock_temp;
 	free(superblock_temp);
+
 	for (int i = 1; i <= n_inodes_blocks; i++)
 	{
 		union fs_block *inode_block_temp = malloc(sizeof(union fs_block));
@@ -121,11 +122,10 @@ void fs_debug()
 	printf("    %d inodes\n", block.super.ninodes);
 
 	int ninodes = block.super.ninodes;
-	int inodes_per_block = BLOCK_SIZE / sizeof(struct fs_inode); 
+	int inodes_per_block = BLOCK_SIZE / sizeof(struct fs_inode);
 	int inode_blocks = ninodes / inodes_per_block;
 
-
-	for (int i = -1; i < inode_blocks-1; i++)
+	for (int i = -1; i < inode_blocks - 1; i++)
 	{
 		// printf("\n\nRound %d\n\n", i+1);
 		disk_read(thedisk, i + 1, block.data);
@@ -134,9 +134,9 @@ void fs_debug()
 			if (block.inode[j].isvalid)
 			{
 				char ctime_str[30];
-				struct tm* ctime_tm = localtime(&block.inode[j].ctime);
+				struct tm *ctime_tm = localtime(&block.inode[j].ctime);
 				strftime(ctime_str, sizeof(ctime_str), "%a %b %d %H:%M:%S %Y", ctime_tm);
-				
+
 				printf("inode %d:\n", j);
 				printf("    size: %d bytes\n", block.inode[j].size);
 				printf("    created: %s\n", ctime_str);
@@ -172,8 +172,6 @@ void fs_debug()
 	return;
 }
 
-
-
 int fs_mount()
 {
 	/**
@@ -204,7 +202,29 @@ int fs_create()
 {
 	// Create a new inode of zero length. On success, return the (positive)
 	// inumber. On failure, return zero.
-	return 0;
+
+	int new_inode = 0;
+	for (int i = 1; i < svsfs->super.ninodeblocks; i++)
+	{
+		if (free_bit_map[i] == 0 && svsfs[i].inode == 0)
+		{
+			/* code */
+			union fs_block *new_block = malloc(sizeof(union fs_block));
+			if (!new_block)
+			{
+				return 0;
+			}
+			time_t curtime;
+			time(&curtime);
+			new_block->inode->ctime = ctime(&curtime);
+			new_block->inode->size = 0;
+			new_block->inode->indirect = 0;
+			svsfs[i] = *new_block;
+			return new_inode;
+		}
+	}
+
+	return new_inode;
 }
 
 int fs_delete(int inumber)
