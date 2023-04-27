@@ -1,6 +1,5 @@
 #include "fs.h"
 #include "disk.h"
-#include "disk.c"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -69,14 +68,14 @@ int fs_format()
 		// free the fs
 		free(svsfs);
 	}
-	printf("This is the blocks in the disk: %d", thedisk->nblocks);
-	svsfs = (union fs_block *)malloc(sizeof(union fs_block) * thedisk->nblocks);
+
+	svsfs = (union fs_block *)malloc(sizeof(union fs_block) * disk_nblocks(thedisk));
 	if (!svsfs)
 	{
 		return 0;
 	}
 
-	int n_inodes_blocks = thedisk->nblocks / 10;
+	int n_inodes_blocks = disk_nblocks(thedisk) / 10;
 
 	union fs_block *superblock_temp = malloc(sizeof(union fs_block));
 	if (!superblock_temp)
@@ -84,7 +83,7 @@ int fs_format()
 		return 0;
 	}
 	superblock_temp->super.magic = FS_MAGIC;
-	superblock_temp->super.nblocks = thedisk->nblocks;
+	superblock_temp->super.nblocks = disk_nblocks(thedisk);
 	superblock_temp->super.ninodeblocks = n_inodes_blocks;
 	superblock_temp->super.ninodes = n_inodes_blocks * INODES_PER_BLOCK;
 	svsfs[0] = *superblock_temp;
