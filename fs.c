@@ -1,5 +1,6 @@
 #include "fs.h"
 #include "disk.h"
+#include <time.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -103,6 +104,8 @@ int fs_format()
 	return 1;
 }
 
+#include <time.h>
+
 void fs_debug()
 {
 	/**
@@ -116,7 +119,60 @@ void fs_debug()
 	printf("    %d blocks\n", block.super.nblocks);
 	printf("    %d inode blocks\n", block.super.ninodeblocks);
 	printf("    %d inodes\n", block.super.ninodes);
+
+	int ninodes = block.super.ninodes;
+	int inodes_per_block = BLOCK_SIZE / sizeof(struct fs_inode); 
+	int inode_blocks = ninodes / inodes_per_block;
+
+
+	for (int i = -1; i < inode_blocks-1; i++)
+	{
+		// printf("\n\nRound %d\n\n", i+1);
+		disk_read(thedisk, i + 1, block.data);
+		for (int j = 0; j < inodes_per_block; j++)
+		{
+			if (block.inode[j].isvalid)
+			{
+				char ctime_str[30];
+				struct tm* ctime_tm = localtime(&block.inode[j].ctime);
+				strftime(ctime_str, sizeof(ctime_str), "%a %b %d %H:%M:%S %Y", ctime_tm);
+				
+				printf("inode %d:\n", j);
+				printf("    size: %d bytes\n", block.inode[j].size);
+				printf("    created: %s\n", ctime_str);
+				printf("    direct blocks:");
+				for (int k = 0; k < POINTERS_PER_INODE; k++)
+				{
+					if (block.inode[j].direct[k])
+					{
+						printf(" %d", block.inode[j].direct[k]);
+					}
+				}
+				printf("\n");
+				if (block.inode[j].indirect)
+				{
+					printf("    indirect block: %d\n", block.inode[j].indirect);
+					printf("    indirect data blocks:");
+					disk_read(thedisk, block.inode[j].indirect, block.data);
+					for (int k = 0; k < POINTERS_PER_BLOCK; k++)
+					{
+						if (block.pointers[k])
+						{
+							printf(" %d", block.pointers[k]);
+						}
+					}
+					printf("\n");
+				}
+			}
+		}
+	}
+
+	printf("\n");
+
+	return;
 }
+
+
 
 int fs_mount()
 {
