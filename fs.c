@@ -211,22 +211,24 @@ int fs_mount()
 				disk_read(thedisk, b.inode[j].indirect, indirect_block.data);
 				for (int k = 0; k < POINTERS_PER_BLOCK; k++)
 				{
-					union fs_block pointer_block;
 
 					if (indirect_block.pointers[k])
 					{
-						/* code */
+						free_bit_map[indirect_block.pointers[k]] = 1;
+						NFB--;
+					}
+					else
+					{
+						break;
 					}
 				}
-
-				/* code */
 			}
 		}
 	}
 
 	is_mounted = 1 == 1;
 
-	return 0;
+	return 1;
 }
 
 int fs_create()
