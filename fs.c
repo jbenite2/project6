@@ -125,7 +125,7 @@ void fs_debug()
 	int inodes_per_block = BLOCK_SIZE / sizeof(struct fs_inode);
 	int inode_blocks = ninodes / inodes_per_block;
 
-	for (int i = -1; i < inode_blocks - 1; i++)
+	for (int i = 0; i < inode_blocks - 1; i++)
 	{
 		// printf("\n\nRound %d\n\n", i+1);
 		disk_read(thedisk, i + 1, block.data);
@@ -206,7 +206,7 @@ int fs_create()
 	int new_inode = 0;
 	for (int i = 1; i < svsfs->super.ninodeblocks; i++)
 	{
-		if (free_bit_map[i] == 0 && svsfs[i].inode == 0)
+		if (free_bit_map[i] == 0 && svsfs[i].inode->isvalid == 0)
 		{
 			/* code */
 			union fs_block *new_block = malloc(sizeof(union fs_block));
@@ -216,7 +216,7 @@ int fs_create()
 			}
 			time_t curtime;
 			time(&curtime);
-			new_block->inode->ctime = ctime(&curtime);
+			new_block->inode->ctime = time(&curtime);
 			new_block->inode->size = 0;
 			new_block->inode->indirect = 0;
 			svsfs[i] = *new_block;
