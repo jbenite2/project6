@@ -11,12 +11,6 @@
 #define POINTERS_PER_INODE 3
 #define POINTERS_PER_BLOCK 1024
 
-// Global Variables
-union fs_block *svsfs = NULL;
-extern struct disk *thedisk;
-int is_mounted = 0;
-int *free_bit_map = NULL;
-
 struct fs_superblock
 {
 	uint32_t magic;
@@ -42,6 +36,11 @@ union fs_block
 	unsigned char data[BLOCK_SIZE];
 };
 
+// Global Variables
+extern struct disk *thedisk;
+int is_mounted = 0;
+int *free_bit_map = NULL;
+
 int fs_format()
 {
 	/**
@@ -56,56 +55,31 @@ int fs_format()
 		return 0;
 	}
 
-	if (svsfs)
+	int n = disk_nblocks(thedisk) / 10;
+	if ((disk_nblocks(thedisk) % 10) != 0)
 	{
-		for (int i = 0; i < svsfs[0].super.nblocks; i++)
-		{
-			if (&svsfs[i] == NULL)
-			{
-				continue;
-			}
-			free(&svsfs[i]);
-		}
-		// free the fs
-		free(svsfs);
+		n++;
 	}
 
-	svsfs = (union fs_block *)malloc(sizeof(union fs_block) * disk_nblocks(thedisk));
-	if (!svsfs)
+	int n_inodes_blocks = n;
+
+	union fs_block b;
+	b.super.magic = FS_MAGIC;
+	b.super.nblocks = disk_nblocks(thedisk);
+	b.super.ninodeblocks = n_inodes_blocks;
+	b.super.ninodes = n_inodes_blocks * INODES_PER_BLOCK;
+	disk_write(thedisk, 0, b.data);
+	int to = b.super.ninodeblocks;
+	// iterate through inodes and init it to 0
+	for (int i = 1; i < to; i++)
 	{
-		return 0;
+		memset(b.inode, 0, sizeof(struct fs_inode));
+		disk_write(thedisk, i, b.data);
 	}
 
-	int n_inodes_blocks = disk_nblocks(thedisk) / 10;
-
-	union fs_block *superblock_temp = malloc(sizeof(union fs_block));
-	if (!superblock_temp)
-	{
-		return 0;
-	}
-	superblock_temp->super.magic = FS_MAGIC;
-	superblock_temp->super.nblocks = disk_nblocks(thedisk);
-	superblock_temp->super.ninodeblocks = n_inodes_blocks;
-	superblock_temp->super.ninodes = n_inodes_blocks * INODES_PER_BLOCK;
-	svsfs[0] = *superblock_temp;
-	free(superblock_temp);
-
-	for (int i = 1; i <= n_inodes_blocks; i++)
-	{
-		union fs_block *inode_block_temp = malloc(sizeof(union fs_block));
-		if (!inode_block_temp)
-		{
-			return 0;
-		}
-		memset(inode_block_temp, 0, sizeof(union fs_block));
-		svsfs[i] = *inode_block_temp;
-		free(inode_block_temp);
-	}
-
+	// we allocated just the superblock
 	return 1;
 }
-
-#include <time.h>
 
 void fs_debug()
 {
@@ -179,18 +153,75 @@ int fs_mount()
 	build a free block bitmap, and prepare the filesystem for use. Return one on success, zero otherwise.
 	A successful mount is a pre-requisite for the remaining calls.
 	**/
-	if (!svsfs || svsfs[0].super.magic != FS_MAGIC)
+	union fs_block super_block;
+	disk_read(thedisk, 0, super_block.data);
+
+	if (super_block.super.magic != FS_MAGIC)
 	{
+		// pemar
 		return 0;
 	}
-	free_bit_map = (int *)malloc(sizeof(int) * svsfs[0].super.nblocks);
+	if (super_block.super.ninodes == 0 || super_block.super.nblocks == 0)
+	{
+		// pemar
+		return 0;
+	}
+
+	free_bit_map = (int *)calloc(super_block.super.nblocks, sizeof(int));
 	if (!free_bit_map)
 	{
 		exit(1);
 	}
-	for (int i = 0; i < svsfs[0].super.nblocks; i++)
+	int NFB = super_block.super.nblocks;
+	// super block
+
+	// scan through filesystem and mark what is in use
+
+	for (int i = 0; i < super_block.super.ninodeblocks; i++)
 	{
-		free_bit_map[i] = 0;
+		free_bit_map[i] = 1;
+		NFB--;
+	}
+
+	for (int i = 1; i < super_block.super.ninodeblocks; i++)
+	{
+		/* code */
+		union fs_block b;
+		disk_read(thedisk, i, b.data);
+		// iterate through each inode in the block
+		for (int j = 0; j < INODES_PER_BLOCK; j++)
+		{
+			if (!b.inode[j].isvalid)
+			{
+				continue;
+			}
+
+			for (int k = 0; k < POINTERS_PER_INODE; k++)
+			{
+				if (b.inode[j].direct[k])
+				{
+					free_bit_map[b.inode[j].direct[k]] = 1;
+					NFB--;
+				}
+			}
+			if (b.inode[j].indirect != 0)
+			{
+				// iterate through all the indirect
+				union fs_block indirect_block;
+				disk_read(thedisk, b.inode[j].indirect, indirect_block.data);
+				for (int k = 0; k < POINTERS_PER_BLOCK; k++)
+				{
+					union fs_block pointer_block;
+
+					if (indirect_block.pointers[k])
+					{
+						/* code */
+					}
+				}
+
+				/* code */
+			}
+		}
 	}
 
 	is_mounted = 1 == 1;
@@ -202,29 +233,7 @@ int fs_create()
 {
 	// Create a new inode of zero length. On success, return the (positive)
 	// inumber. On failure, return zero.
-
-	int new_inode = 0;
-	for (int i = 1; i < svsfs->super.ninodeblocks; i++)
-	{
-		if (free_bit_map[i] == 0 && svsfs[i].inode->isvalid == 0)
-		{
-			/* code */
-			union fs_block *new_block = malloc(sizeof(union fs_block));
-			if (!new_block)
-			{
-				return 0;
-			}
-			time_t curtime;
-			time(&curtime);
-			new_block->inode->ctime = time(&curtime);
-			new_block->inode->size = 0;
-			new_block->inode->indirect = 0;
-			svsfs[i] = *new_block;
-			return new_inode;
-		}
-	}
-
-	return new_inode;
+	return 0;
 }
 
 int fs_delete(int inumber)
