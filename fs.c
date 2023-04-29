@@ -296,6 +296,7 @@ int fs_delete(int inumber)
 		abort();
 		return 0;
 	}
+
 	if (inumber < 1)
 	{
 		abort();
@@ -303,10 +304,6 @@ int fs_delete(int inumber)
 	}
 
 	int BLK = inumber / INODES_PER_BLOCK + 1;
-	// if (inumber % INODES_PER_BLOCK == 0)
-	// {
-	// 	BLK -= 1;
-	// }
 	int OFF = inumber % INODES_PER_BLOCK;
 
 	union fs_block b;
@@ -317,17 +314,13 @@ int fs_delete(int inumber)
 		return 0;
 	}
 
-	// Redundant (done below)
-	//  b.inode[OFF].isvalid = 0;
-	//  b.inode[OFF].ctime = 0;
-
-	for (int i; i < POINTERS_PER_INODE; i++)
+	for (int i = 0; i < POINTERS_PER_INODE; i++)
 	{
 		if (b.inode[OFF].direct[i])
 		{
 			free_bit_map[b.inode[OFF].direct[i]] = 0;
+			b.inode[OFF].direct[i] = 0;
 		}
-		b.inode[OFF].direct[i] = 0;
 	}
 
 	if (b.inode[OFF].indirect)
@@ -339,23 +332,22 @@ int fs_delete(int inumber)
 			if (indirect_block.pointers[i])
 			{
 				free_bit_map[indirect_block.pointers[i]] = 0;
-				// set the indirect pointer to all zeros
-
 				indirect_block.pointers[i] = 0;
 			}
 		}
 
-		// free_bit_map[b.inode[OFF].indirect] = 0;
+		free_bit_map[b.inode[OFF].indirect] = 0;
 		b.inode[OFF].indirect = 0;
 		disk_write(thedisk, b.inode[OFF].indirect, indirect_block.data);
-
-		memset(&b.inode[OFF], 0, sizeof(struct fs_inode));
 	}
 
+	memset(&b.inode[OFF], 0, sizeof(struct fs_inode));
 	disk_write(thedisk, BLK, b.data);
+	free_bit_map[BLK] = 0;
 
 	return 1;
 }
+
 int fs_getsize(int inumber)
 {
 	// Return the logical size of the given inode, in bytes. Zero is a valid
