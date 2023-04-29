@@ -39,6 +39,12 @@ extern struct disk *thedisk;
 int is_mounted = 0;
 int *free_bit_map = NULL;
 
+int pemar(char *message)
+{
+	fprintf(stderr, "%s\n", message);
+	return 0;
+}
+
 int fs_format()
 {
 	/**
@@ -50,7 +56,7 @@ int fs_format()
 	**/
 	if (is_mounted)
 	{
-		return 0;
+		return pemar("error: system is already mounted");
 	}
 
 	int n = disk_nblocks(thedisk) / 10;
@@ -78,6 +84,7 @@ int fs_format()
 	// we allocated just the superblock
 	return 1;
 }
+
 void fs_debug()
 {
 	/**
@@ -142,6 +149,7 @@ void fs_debug()
 
 	return;
 }
+
 int fs_mount()
 {
 	/**
@@ -154,13 +162,12 @@ int fs_mount()
 
 	if (super_block.super.magic != FS_MAGIC)
 	{
-		// pemar
-		return 0;
+		return pemar("error: superblock does not match the MAGIC number.");
 	}
 	if (super_block.super.ninodes == 0 || super_block.super.nblocks == 0)
 	{
 		// pemar
-		return 0;
+		return pemar("error: the filesystem has no blocks");
 	}
 
 	free_bit_map = (int *)calloc(super_block.super.nblocks, sizeof(int));
@@ -226,6 +233,7 @@ int fs_mount()
 
 	return 1;
 }
+
 int fs_create()
 {
 	// Create a new inode of zero length. On success, return the (positive)
@@ -233,7 +241,7 @@ int fs_create()
 
 	if (!is_mounted)
 	{
-		return 0;
+		return pemar("error: system is already mounted");
 	}
 
 	// Read super_block and get number of inodes
@@ -267,7 +275,7 @@ int fs_create()
 
 	if (!INODEI)
 	{
-		return 0;
+		return pemar("error: system is full and can't create more inodes.");
 	}
 
 	b.inode[INODEI].isvalid = 1;
@@ -285,6 +293,7 @@ int fs_create()
 
 	return 0;
 }
+
 int fs_delete(int inumber)
 {
 	// Delete the inode indicated by the inumber. Release all data and indirect
@@ -293,14 +302,14 @@ int fs_delete(int inumber)
 
 	if (!is_mounted)
 	{
-		abort();
-		return 0;
+		return pemar("error: system is already mounted");
 	}
 
 	if (inumber < 1)
 	{
-		abort();
-		return 0;
+		char error[100];
+		sprintf(error, "error: invalid inode %d.", inumber);
+		return pemar(error);
 	}
 
 	int BLK = inumber / INODES_PER_BLOCK + 1;
@@ -311,7 +320,9 @@ int fs_delete(int inumber)
 
 	if (!b.inode[OFF].isvalid)
 	{
-		return 0;
+		char error[100];
+		sprintf(error, "error: invalid inode %d is already marked invalid.", inumber);
+		return pemar(error);
 	}
 
 	for (int i = 0; i < POINTERS_PER_INODE; i++)
@@ -355,7 +366,7 @@ int fs_getsize(int inumber)
 
 	if (!is_mounted)
 	{
-		return -1;
+		return pemar("error: system is already mounted") - 1;
 	}
 
 	int BLK = inumber / INODES_PER_BLOCK + 1;
@@ -367,7 +378,9 @@ int fs_getsize(int inumber)
 
 	if (!b.inode[OFF].isvalid)
 	{
-		return -1;
+		char error[100];
+		sprintf(error, "error: inode %d is invalid.", inumber);
+		return pemar(error) - 1;
 	}
 
 	return b.inode[OFF].size;
@@ -381,6 +394,11 @@ int fs_read(int inumber, unsigned char *data, int length, int offset)
   the number of bytes requested, perhaps if the end of the inode is reached. If
   the given inumber is invalid, or any other error is encountered, return 0.
   **/
+	if (!is_mounted)
+	{
+		return pemar("error: system is already mounted");
+	}
+
 	return 0;
 }
 
