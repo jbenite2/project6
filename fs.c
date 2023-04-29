@@ -235,6 +235,59 @@ int fs_create()
 {
 	// Create a new inode of zero length. On success, return the (positive)
 	// inumber. On failure, return zero.
+
+	if (!is_mounted)
+	{
+		return 0;
+	}
+
+	// Read super_block and get number of inodes
+	union fs_block block;
+	disk_read(thedisk, 0, block.data);
+
+	int NIN = block.super.ninodes;
+	int BLK = 1;
+	int INODEI = 0;
+
+	union fs_block b;
+	disk_read(thedisk, BLK, b.data);
+
+	for (int i = 1; i < NIN - 1; i++)
+	{
+		/* code */
+
+		if (i % INODES_PER_BLOCK == 0)
+		{
+			BLK += 1;
+			disk_read(thedisk, BLK, b.data);
+		}
+
+		if (b.inode[i].isvalid == 0)
+		{
+			INODEI = i;
+			break;
+		}
+		// iterate through each inode in the block
+	}
+
+	if (!INODEI)
+	{
+		return 0;
+	}
+
+	b.inode[INODEI].isvalid = 1;
+
+	// set ctime
+	b.inode[INODEI].ctime = time(NULL);
+	b.inode[INODEI].direct[0] = 0;
+	b.inode[INODEI].direct[1] = 0;
+	b.inode[INODEI].direct[2] = 0;
+	b.inode[INODEI].indirect = 0;
+
+	disk_write(thedisk, BLK, b.data);
+
+	return INODEI;
+
 	return 0;
 }
 
@@ -243,7 +296,71 @@ int fs_delete(int inumber)
 	// Delete the inode indicated by the inumber. Release all data and indirect
 	// blocks assigned to this inode and return them to the free block map. On
 	// success, return one. On failure, return 0.
-	return 0;
+
+	if (!is_mounted)
+	{
+		abort();
+		return 0;
+	}
+	if (inumber < 1)
+	{
+		abort();
+		return 0;
+	}
+
+	int BLK = inumber / INODES_PER_BLOCK + 1;
+	// if (inumber % INODES_PER_BLOCK == 0)
+	// {
+	// 	BLK -= 1;
+	// }
+	int OFF = inumber % INODES_PER_BLOCK;
+
+	union fs_block b;
+	disk_read(thedisk, BLK, b.data);
+
+	if (!b.inode[OFF].isvalid)
+	{
+		return 0;
+	}
+
+	// Redundant (done below)
+	//  b.inode[OFF].isvalid = 0;
+	//  b.inode[OFF].ctime = 0;
+
+	for (int i; i < POINTERS_PER_INODE; i++)
+	{
+		if (b.inode[OFF].direct[i])
+		{
+			free_bit_map[b.inode[OFF].direct[i]] = 0;
+		}
+		b.inode[OFF].direct[i] = 0;
+	}
+
+	if (b.inode[OFF].indirect)
+	{
+		union fs_block indirect_block;
+		disk_read(thedisk, b.inode[OFF].indirect, indirect_block.data);
+		for (int i = 0; i < POINTERS_PER_BLOCK; i++)
+		{
+			if (indirect_block.pointers[i])
+			{
+				free_bit_map[indirect_block.pointers[i]] = 0;
+				// set the indirect pointer to all zeros
+
+				indirect_block.pointers[i] = 0;
+			}
+		}
+
+		// free_bit_map[b.inode[OFF].indirect] = 0;
+		b.inode[OFF].indirect = 0;
+		disk_write(thedisk, b.inode[OFF].indirect, indirect_block.data);
+
+		memset(&b.inode[OFF], 0, sizeof(struct fs_inode));
+	}
+
+	disk_write(thedisk, BLK, b.data);
+
+	return 1;
 }
 
 int fs_getsize(int inumber)
