@@ -18,7 +18,6 @@ struct fs_superblock
 	uint32_t ninodeblocks;
 	uint32_t ninodes;
 };
-
 struct fs_inode
 {
 	uint32_t isvalid;
@@ -27,7 +26,6 @@ struct fs_inode
 	uint32_t direct[POINTERS_PER_INODE];
 	uint32_t indirect;
 };
-
 union fs_block
 {
 	struct fs_superblock super;
@@ -80,7 +78,6 @@ int fs_format()
 	// we allocated just the superblock
 	return 1;
 }
-
 void fs_debug()
 {
 	/**
@@ -145,7 +142,6 @@ void fs_debug()
 
 	return;
 }
-
 int fs_mount()
 {
 	/**
@@ -230,7 +226,6 @@ int fs_mount()
 
 	return 1;
 }
-
 int fs_create()
 {
 	// Create a new inode of zero length. On success, return the (positive)
@@ -290,7 +285,6 @@ int fs_create()
 
 	return 0;
 }
-
 int fs_delete(int inumber)
 {
 	// Delete the inode indicated by the inumber. Release all data and indirect
@@ -362,12 +356,29 @@ int fs_delete(int inumber)
 
 	return 1;
 }
-
 int fs_getsize(int inumber)
 {
 	// Return the logical size of the given inode, in bytes. Zero is a valid
 	// logical size for an inode! On failure, return -1
-	return 0;
+
+	if (!is_mounted)
+	{
+		return -1;
+	}
+
+	int BLK = inumber / INODES_PER_BLOCK + 1;
+	int OFF = inumber % INODES_PER_BLOCK;
+
+	union fs_block b;
+
+	disk_read(thedisk, BLK, b.data);
+
+	if (!b.inode[OFF].isvalid)
+	{
+		return -1;
+	}
+
+	return b.inode[OFF].size;
 }
 
 int fs_read(int inumber, unsigned char *data, int length, int offset)
