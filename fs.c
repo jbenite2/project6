@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
 #define FS_MAGIC 0x34341023
 #define INODES_PER_BLOCK 128
@@ -38,6 +39,121 @@ union fs_block
 extern struct disk *thedisk;
 int is_mounted = 0;
 int *free_bit_map = NULL;
+
+// Provided by Flynn:
+
+// check to see if block b is free
+int isfree(int b)
+{
+	int ix = b / 8; // 8 bits per byte; this is the byte number
+	unsigned char mask[] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
+	// if bit is set, return nonzero; else return zero
+	return ((freeblock[ix] & mask[b % 8]) != 0);
+}
+
+int getfblockindex(struct fs_inode *inode, unsigned int blkno)
+{
+	assert(blkno < (POINTERS_PER_BLOCK + POINTERS_PER_INODE));
+	if (blkno < POINTERS_PER_INODE)
+	{
+		assert(inode->direct[blkno] != 0);
+		assert(!isfree(inode->direct[blkno]));
+#ifdef DEBUG
+		printf("fblock %d, dblock %d (direct)\n", blkno, inode->direct[blkno]);
+#endif
+		return inode->direct[blkno];
+	}
+	else
+	{
+		// read indirect block
+		union fs_block ib;
+		assert(!isfree(inode->indirect));
+		disk_read(thedisk, inode->indirect, ib.data);
+		// read data pointed to by pointer within the block (make sure to offset index)
+		int dbno = ib.pointers[blkno - POINTERS_PER_INODE];
+#ifdef DEBUG
+		printf("fblock %d, dblock %d (indirect in block %d)\n", blkno, dbno, inode->indirect);
+#endif
+		assert(dbno != 0);
+		assert(!isfree(dbno));
+		return dbno;
+	}
+}
+
+void getfblock(struct fs_inode *inode, unsigned char *data, unsigned int fblkno, unsigned int *bkidx)
+{
+	int dblkno = getfblockindex(inode, fblkno);
+#ifdef DEBUG
+	printf("getfblock: file block %d is disk block %d\n", fblkno, dblkno);
+#endif
+	disk_read(thedisk, dblkno, data);
+	if (bkidx)
+		*bkidx = dblkno;
+}
+
+// utility functions for using the free-block bitmap.
+// This bitmap is constructed in fs_mount().
+// This is a true bitmap, with one bit per block.
+// A 1 bit means the corresponding block is free.
+// A 0 bit means the corresponding block is allocated.
+
+// print out the free block bitmap.
+void printfree()
+{
+	for (int i = 0; i < disk_nblocks(thedisk); i++)
+	{
+		printf("%02X", freeblock[i]);
+	}
+}
+
+// set the bit indicating that block b is free.
+void markfree(int b)
+{
+	int ix = b / 8; // 8 bits per byte; this is the index of the byte to modify
+	unsigned char mask[] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
+	// OR in the bit that corresponds to the block we're talking about.
+	freeblock[ix] |= mask[b % 8];
+}
+
+// set the bit indicating that block b is used.
+void markused(int b)
+{
+	int ix = b / 8; // 8 bits per byte; this is the index of the byte to modify
+	unsigned char mask[] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
+	// AND the byte with the inverse of the bitmask to force the desired bit to 0
+	freeblock[ix] &= ~mask[b % 8];
+}
+
+// find a free block and return its index of a free block
+// Note: the superblock and inode blocks' bits need to be 0, otherwise it will be BAD
+// Alternatives would be to not have bits for the super & inode blocks, OR
+// to use the superblock to figure out where the inode blocks stop. We don't want to read
+// the superblock every time this function is called. So efficient but not safe.
+// You can use short-circuit if conditions and more complex looping to skip over
+// chars that are 0 -- implement this and let prof&GTA know and we'll toss you a couple of points.
+int getfreeblock()
+{
+	// printf("Searching %d blocks for a free block\n",disk_nblocks(thedisk));
+	for (int i = 0; i < disk_nblocks(thedisk); i++)
+		if (isfree(i))
+		{
+			// printf("found free block at %d\n",i);
+			return i;
+		}
+	printf("No free blocks found\n");
+	return -1;
+}
+
+// return number of free blocks
+// This also expects the superblock and inode blocks to be marked unavailable
+unsigned int nfreeblocks()
+{
+	unsigned int n = 0;
+	for (int i = 0; i < disk_nblocks(thedisk); i++)
+		if (isfree(i))
+			n++;
+	return n;
+}
 
 int pemar(char *message)
 {
@@ -412,87 +528,83 @@ int bytes_to_read(union fs_block block, int length, int offset)
 		}
 	}
 
-	return total_bytes_to_read; // read through the whole block
+	return total_bytes_to_read; // return total bytes
 }
 
-int fs_read(int inumber, unsigned char *data, int length, int offset)
+if (!is_mounted)
 {
-	/** Read data from a valid inode. Copy length bytes from the inode into the
-  address pointed to by data, starting at offset in the inode. Return the total
-  number of bytes read. The number of bytes actually read could be smaller than
-  the number of bytes requested, perhaps if the end of the inode is reached. If
-  the given inumber is invalid, or any other error is encountered, return 0.
-  **/
-	if (!is_mounted)
+	return pemar("error: system is already mounted");
+}
+
+// 2. figure out block number BLK and offset OFF of inode numbered inumber
+int BLK = inumber / INODES_PER_BLOCK + 1;
+int OFF = inumber % INODES_PER_BLOCK;
+int changing_blk = offset / BLOCK_SIZE;				   // inode block number
+int changing_off = offset - changing_blk * BLOCK_SIZE; // offset in the block
+
+// 3. read BLK and look at the inode INODE corresponding to index `inumber` (use OFFto get the index)
+union fs_block block;
+disk_read(thedisk, BLK, block.data);
+struct fs_inode inode = block.inode[OFF];
+
+// 3a. If INODE is not valid, PEMAR
+if (inode.isvalid == 0)
+{
+	return pemar("error: inode is not valid");
+}
+
+// 3b. If offset is > file size, PEMAR
+if (offset > inode.size)
+{
+	// at the end of the file
+	return pemar("error: offset is greater than inode size");
+}
+
+// 3c. If offset + length > file size, reduce length to size - offset
+if (offset + length > inode.size)
+{
+	length = inode.size - offset;
+}
+
+// 4. Read length bytes from the blocks on disk and copy them to data
+// 4a Read a whole block
+
+int bytes_read = 0;
+union fs_block buffer_block;
+
+while (bytes_read < length)
+{
+	// if(changing_blk < 3){
+	// 	disk_read(thedisk, block.inode[OFF].direct[changing_blk], buffer_block.data);
+	// }
+	// else{
+	// 	union fs_block indirect_block;
+	// 	disk_read(thedisk, block.inode[OFF].indirect, indirect_block.data);
+	// 	disk_read(thedisk, indirect_block.pointers[changing_blk - 3], buffer_block.data);
+	// }
+	int BLK = getfblockindex(&inode, offset + bytes_read);
+	disk_read(thedisk, BLK, buffer_block.data);
+	int BTR = bytes_to_read(buffer_block, length, offset);
+	if (BTR + offset >= length)
 	{
-		return pemar("error: system is already mounted");
+		break;
+	}
+	memcpy(data + bytes_read, buffer_block.data + changing_off, BTR);
+	bytes_read += BTR;
+}
+
+return bytes_read;
+direct and indirect blocks to store this written data.Return the number of
+	bytes actually written.The number of bytes actually written could be smaller
+		than the number of bytes request,
+	perhaps if the disk becomes full.If the
+		given inumber is invalid,
+	or any other error is encountered, return 0. * * / return 0;
+or an o
+}
+her error0iseencounr / *0ret
 	}
 
-	int BLK = inumber / INODES_PER_BLOCK + 1;
-	int OFF = inumber % INODES_PER_BLOCK;
-	union fs_block block;
-	disk_read(thedisk, BLK, block.data);
-	struct fs_inode inode = block.inode[OFF];
-
-	if (inode.isvalid == 0)
-	{
-		return pemar("error: inode is not valid");
-	}
-
-	if (offset > inode.size)
-	{
-		// at the end of the file
-		return pemar("error: offset is greater than inode size");
-	}
-
-	if (offset + length > inode.size)
-	{
-		length = inode.size - offset;
-	}
-
-	// Read length bytes from the blocks on disk and copy them to data
-	//  read a whole block
-	int bytes_read = 0; // we have read 0 bytes so far
-	union fs_block buffer_block;
-
-	if (offset > 3 * BLOCK_SIZE) // indirect block
-	{
-		union fs_block indirect_block;
-		disk_read(thedisk, inode.indirect, indirect_block.data);
-		// find indirect offset
-		while (bytes_read < length)
-		{
-			/* code */
-			union fs_block block_to_read;
-			int indirect_offset = (offset - 3 * BLOCK_SIZE) % BLOCK_SIZE; // #TODO: check this
-			disk_read(thedisk, indirect_block.pointers[indirect_offset], block_to_read.data);
-			int next_bytes = bytes_to_read(block_to_read, length, offset);
-			memcpy(data, block_to_read.data, next_bytes);
-			bytes_read += next_bytes;
-			if (offset + next_bytes > inode.size)
-			{
-				break;
-			}
-		}
-	}
-	else // direct blocks
-	{
-		int direct_block_index = offset / BLOCK_SIZE; // either 1, 2, or 3
-		while (bytes_read < length)
-		{
-			union fs_block block_to_read;
-			disk_read(thedisk, inode.direct[direct_block_index], block_to_read.data);
-			int next_bytes = bytes_to_read(block_to_read, length, offset); // checks to make sure the bytes are valid and how many we can read
-
-			memcpy(data, block_to_read.data, next_bytes);
-			bytes_read += next_bytes; // will be less than length
-			if (offset + bytes_read >= 3 * BLOCK_SIZE)
-			{
-				// no longer reading direct blocks
-				break;
-			}
-		}
-	}
 	return bytes_read;
 }
 
