@@ -517,6 +517,14 @@ int fs_read(int inumber, unsigned char *data, int length, int offset)
 	return bytes_read;
 }
 
+int deallocate_block(fs_block block, int block_number){
+
+	return 0;
+}
+int allocate_block(fs_block block, int block_number){
+	// not sure on params
+	return 0;
+}
 int fs_write(int inumber, const unsigned char *data, int length, int offset)
 {
 	/**
@@ -548,14 +556,53 @@ int fs_write(int inumber, const unsigned char *data, int length, int offset)
 	int old_file_size = INODE.size;
 	int old_blocks =  old_file_size % BLOCK_SIZE;
 
+	int block_list_index = 0;
+
 	if(blocks_to_allocate > old_blocks){
 		// we need to allocate more blocks
+		int block_list[blocks_to_allocate];
+		// pick off where its at and allocate more
+
 	} 
 	else if(blocks_to_allocate < old_blocks){
 		// we need to deallocate all the old blocks
+		// go through all the blocks (direct + indirect)
+		// deallocate direct blocks
+		int block_list[old_blocks];
+		int d;
+		union fs_block block_del;
+		for (int i = 0; i < 3; i++)
+		{
+			disk_read(thedisk, INODE.direct[i], block_del.data);
+			d = deallocate_block(block_del, i); // add the block number to a list of free blocks or find fresh block when reallocating
+			block_list[block_list_index++] = d;
+		}
+		// deallocate indirect blocks
+		disk_read(thedisk, INODE.indirect, block_del.data);
+		for (int i = 0; i < BLOCK_SIZE / sizeof(int); i++)
+		{
+			d = deallocate_block(block_del, i); // add the block number to a list of free blocks or find fresh block when reallocating
+		}
 	} else {
 		// blocks are the same just right over
 	}
 
+	// now we begin writing
+	int bytes_written = 0;
+	union fs_block buffer_block;
+	// go through the blocks in the block list and write to them
+	while (bytes_written < length)
+	{
+		// idk if this is right
+		int BLK = getfblockindex(&INODE, offset + bytes_written);
+		disk_read(thedisk, BLK, buffer_block.data);
+ 
+		int BTR = bytes_to_read(buffer_block, length, offset + bytes_written);
+		memcpy(data + bytes_written, buffer_block.data + changing_off, BTR);
+		bytes_written += BTR;
+	}
+
 	return 0;
 }
+
+
