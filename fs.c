@@ -386,6 +386,35 @@ int fs_getsize(int inumber)
 	return b.inode[OFF].size;
 }
 
+int bytes_to_read(union fs_block block, int length, int offset)
+{
+	// go through each byte in the block and check if it is valid
+	// if it is valid, then add it to the total bytes to read
+	// if it is not valid, then return the total bytes to read
+	// if the total bytes to read is greater than the offset, then return the total bytes to read
+	// if the total bytes to read is less than the offset, then return 0
+	int total_bytes_to_read = 0;
+
+	for (int i = 0; i < BLOCK_SIZE; i++)
+	{
+		if (total_bytes_to_read + offset == length) // can't read no more
+		{
+			return total_bytes_to_read;
+		}
+
+		if (block.data[i]) // valid byte
+		{
+			total_bytes_to_read++;
+		}
+		else // invalid byte
+		{
+			return total_bytes_to_read;
+		}
+	}
+
+	return total_bytes_to_read; // read through the whole block
+}
+
 int fs_read(int inumber, unsigned char *data, int length, int offset)
 {
 	/** Read data from a valid inode. Copy length bytes from the inode into the
@@ -399,7 +428,72 @@ int fs_read(int inumber, unsigned char *data, int length, int offset)
 		return pemar("error: system is already mounted");
 	}
 
-	return 0;
+	int BLK = inumber / INODES_PER_BLOCK + 1;
+	int OFF = inumber % INODES_PER_BLOCK;
+	union fs_block block;
+	disk_read(thedisk, BLK, block.data);
+	struct fs_inode inode = block.inode[OFF];
+
+	if (inode.isvalid == 0)
+	{
+		return pemar("error: inode is not valid");
+	}
+
+	if (offset > inode.size)
+	{
+		// at the end of the file
+		return pemar("error: offset is greater than inode size");
+	}
+
+	if (offset + length > inode.size)
+	{
+		length = inode.size - offset;
+	}
+
+	// Read length bytes from the blocks on disk and copy them to data
+	//  read a whole block
+	int bytes_read = 0; // we have read 0 bytes so far
+	union fs_block buffer_block;
+
+	if (offset > 3 * BLOCK_SIZE) // indirect block
+	{
+		union fs_block indirect_block;
+		disk_read(thedisk, inode.indirect, indirect_block.data);
+		// find indirect offset
+		while (bytes_read < length)
+		{
+			/* code */
+			union fs_block block_to_read;
+			int indirect_offset = (offset - 3 * BLOCK_SIZE) % BLOCK_SIZE; // #TODO: check this
+			disk_read(thedisk, indirect_block.pointers[indirect_offset], block_to_read.data);
+			int next_bytes = bytes_to_read(block_to_read, length, offset);
+			memcpy(data, block_to_read.data, next_bytes);
+			bytes_read += next_bytes;
+			if (offset + next_bytes > inode.size)
+			{
+				break;
+			}
+		}
+	}
+	else // direct blocks
+	{
+		int direct_block_index = offset / BLOCK_SIZE; // either 1, 2, or 3
+		while (bytes_read < length)
+		{
+			union fs_block block_to_read;
+			disk_read(thedisk, inode.direct[direct_block_index], block_to_read.data);
+			int next_bytes = bytes_to_read(block_to_read, length, offset); // checks to make sure the bytes are valid and how many we can read
+
+			memcpy(data, block_to_read.data, next_bytes);
+			bytes_read += next_bytes; // will be less than length
+			if (offset + bytes_read >= 3 * BLOCK_SIZE)
+			{
+				// no longer reading direct blocks
+				break;
+			}
+		}
+	}
+	return bytes_read;
 }
 
 int fs_write(int inumber, const unsigned char *data, int length, int offset)
