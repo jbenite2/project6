@@ -41,6 +41,14 @@ int is_mounted = 0;
 int *free_bit_map = NULL;
 
 // Provided by Flynn:
+int isfree(int b)
+{
+	int ix = b / 8; // 8 bits per byte; this is the byte number
+	unsigned char mask[] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
+	// if bit is set, return nonzero; else return zero
+	return ((free_bit_map[ix] & mask[b % 8]) != 0);
+}
+
 int getfblockindex(struct fs_inode *inode, unsigned int blkno)
 {
 	assert(blkno < (POINTERS_PER_BLOCK + POINTERS_PER_INODE));
@@ -79,14 +87,6 @@ void getfblock(struct fs_inode *inode, unsigned char *data, unsigned int fblkno,
 	disk_read(thedisk, dblkno, data);
 	if (bkidx)
 		*bkidx = dblkno;
-}
-
-int isfree(int b)
-{
-	int ix = b / 8; // 8 bits per byte; this is the byte number
-	unsigned char mask[] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
-	// if bit is set, return nonzero; else return zero
-	return ((freeblock[ix] & mask[b % 8]) != 0);
 }
 
 int pemar(char *message)
@@ -438,43 +438,17 @@ int fs_getsize(int inumber)
 
 int bytes_to_read(union fs_block block, int length, int offset)
 {
-	// go through each byte in the block and check if it is valid
-	// if it is valid, then add it to the total bytes to read
-	// if it is not valid, then return the total bytes to read
-	// if the total bytes to read is greater than the offset, then return the total bytes to read
-	// if the total bytes to read is less than the offset, then return 0
-	int total_bytes_to_read = 0;
-
-	for (int i = 0; i < BLOCK_SIZE; i++)
-	{
-		if (total_bytes_to_read + offset == length) // can't read no more
-		{
-			return total_bytes_to_read;
-		}
-
-		if (block.data[i]) // valid byte
-		{
-			total_bytes_to_read++;
-		}
-		else // invalid byte
-		{
-			return total_bytes_to_read;
-		}
+	//End Case
+	if (offset < length && length < offset + BLOCK_SIZE){
+		return length-offset;
 	}
 
-	return total_bytes_to_read; // return total bytes
+	//Partial and full block cases
+	int BR = BLOCK_SIZE - (offset % BLOCK_SIZE);
+
+	return BR; // return total bytes
 }
 
-int get_is_partial_block(union fs_block block, int length, int offset)
-{
-	int total_bytes_to_read = bytes_to_read(block, length, offset);
-	int is_partial_block = 0;
-	if (total_bytes_to_read % BLOCK_SIZE)
-	{
-		is_partial_block = 1;
-	}
-	return is_partial_block;
-}
 
 int fs_read(int inumber, unsigned char *data, int length, int offset)
 {
@@ -530,24 +504,15 @@ int fs_read(int inumber, unsigned char *data, int length, int offset)
 
 	while (bytes_read < length)
 	{
-		// if(changing_blk < 3){
-		// 	disk_read(thedisk, block.inode[OFF].direct[changing_blk], buffer_block.data);
-		// }
-		// else{
-		// 	union fs_block indirect_block;
-		// 	disk_read(thedisk, block.inode[OFF].indirect, indirect_block.data);
-		// 	disk_read(thedisk, indirect_block.pointers[changing_blk - 3], buffer_block.data);
-		// }
 		int BLK = getfblockindex(&inode, offset + bytes_read);
 		disk_read(thedisk, BLK, buffer_block.data);
-		int BTR = bytes_to_read(buffer_block, length, offset);
-		if (BTR + offset >= length)
-		{
-			break;
-		}
+ 
+		int BTR = bytes_to_read(buffer_block, length, offset + bytes_read);
 		memcpy(data + bytes_read, buffer_block.data + changing_off, BTR);
 		bytes_read += BTR;
 	}
+
+
 
 	return bytes_read;
 }
