@@ -527,5 +527,35 @@ int fs_write(int inumber, const unsigned char *data, int length, int offset)
   than the number of bytes request, perhaps if the disk becomes full. If the
   given inumber is invalid, or any other error is encountered, return 0.
   **/
+	if(!is_mounted){
+		return pemar("Error: system is not mounted");
+	}
+	int BLK = inumber / INODES_PER_BLOCK + 1;
+	int OFF = inumber % INODES_PER_BLOCK;
+	
+	union fs_block block;
+	disk_read(thedisk, BLK, block.data);
+	struct fs_inode INODE = block.inode[OFF];
+
+	if(! (INODE.isvalid)){
+		char error[100];
+		sprintf(error, "Error: inode %d is not valid", inumber);
+		return pemar(error);
+	}
+	int new_file_size = length + offset;
+	int blocks_to_allocate = new_file_size % BLOCK_SIZE;
+	
+	int old_file_size = INODE.size;
+	int old_blocks =  old_file_size % BLOCK_SIZE;
+
+	if(blocks_to_allocate > old_blocks){
+		// we need to allocate more blocks
+	} 
+	else if(blocks_to_allocate < old_blocks){
+		// we need to deallocate all the old blocks
+	} else {
+		// blocks are the same just right over
+	}
+
 	return 0;
 }
