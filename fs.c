@@ -38,7 +38,7 @@ union fs_block
 // Global Variables
 extern struct disk *thedisk;
 int is_mounted = 0;
-int *free_bit_map = NULL;
+unsigned char *free_bit_map = NULL;
 
 // Provided by Flynn:
 int isfree(int b)
@@ -68,6 +68,7 @@ int getfblockindex(struct fs_inode *inode, unsigned int blkno)
 	if (blkno < POINTERS_PER_INODE)
 	{
 		assert(inode->direct[blkno] != 0);
+
 		assert(!isfree(inode->direct[blkno]));
 #ifdef DEBUG
 		printf("fblock %d, dblock %d (direct)\n", blkno, inode->direct[blkno]);
@@ -251,7 +252,8 @@ int fs_mount()
 		return pemar("error: the filesystem has no blocks");
 	}
 
-	free_bit_map = (int *)calloc(super_block.super.nblocks, sizeof(int));
+	// free_bit_map = (int *)malloc(super_block.super.nblocks, sizeof(unsigned));
+	free_bit_map = (unsigned char *)malloc(super_block.super.nblocks / 8);
 	if (!free_bit_map)
 	{
 		exit(1);
@@ -410,7 +412,7 @@ int fs_delete(int inumber)
 	{
 		if (b.inode[OFF].direct[i])
 		{
-			free_bit_map[b.inode[OFF].direct[i]] = 0;
+			markfree(b.inode[OFF].direct[i]);
 			b.inode[OFF].direct[i] = 0;
 		}
 	}
@@ -423,19 +425,19 @@ int fs_delete(int inumber)
 		{
 			if (indirect_block.pointers[i])
 			{
-				free_bit_map[indirect_block.pointers[i]] = 0;
+				markfree(indirect_block.pointers[i]);
 				indirect_block.pointers[i] = 0;
 			}
 		}
 
-		free_bit_map[b.inode[OFF].indirect] = 0;
+		markfree(b.inode[OFF].indirect);
 		b.inode[OFF].indirect = 0;
 		disk_write(thedisk, b.inode[OFF].indirect, indirect_block.data);
 	}
 
 	memset(&b.inode[OFF], 0, sizeof(struct fs_inode));
 	disk_write(thedisk, BLK, b.data);
-	free_bit_map[BLK] = 0;
+	markfree(BLK);
 
 	return 1;
 }
@@ -593,7 +595,7 @@ void allocate_block(int blocks_to_allocate, struct fs_inode *inode)
 			inode->direct[i] = new_block;
 
 			// allocate a new block in free block map
-			free_bit_map[new_block] = 1;
+			markused(new_block);
 
 			// decrease the number of blocks to allocate
 			blocks_to_allocate--;
@@ -613,7 +615,7 @@ void allocate_block(int blocks_to_allocate, struct fs_inode *inode)
 		inode->indirect = new_block;
 
 		// allocate a new block in free block map
-		free_bit_map[new_block] = 1;
+		markused(new_block);
 	}
 
 	union fs_block indirect_block;
@@ -629,7 +631,7 @@ void allocate_block(int blocks_to_allocate, struct fs_inode *inode)
 			indirect_block.pointers[i - 3] = new_block;
 
 			// allocate a new block in free block map
-			free_bit_map[new_block] = 1;
+			markused(new_block);
 
 			// decrease the number of blocks to allocate
 			blocks_to_allocate--;
