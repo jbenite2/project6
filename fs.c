@@ -544,7 +544,7 @@ int fs_read(int inumber, unsigned char *data, int length, int offset)
 	return bytes_read;
 }
 
-void deallocate_block(struct fs_inode inode, int * block_list)
+void deallocate_block(struct fs_inode inode)
 {
 	// Loop through the direct blocks
 	int block_index = 0;
@@ -552,7 +552,6 @@ void deallocate_block(struct fs_inode inode, int * block_list)
 	{
 		int block = inode.direct[i];
 		if (block == 0) continue;
-		block_list[block_index++] = block;
 		markfree(block);
 		inode.direct[i] = 0;
 	}
@@ -565,11 +564,9 @@ void deallocate_block(struct fs_inode inode, int * block_list)
 	{
 		int block = indirect_block.pointers[i];
 		if (block == 0) continue;
-		block_list[block_index++] = block;
 		markfree(block);
 		indirect_block.pointers[i] = 0;
 	}
-	block_index[block_index++] = inode.indirect;
 	markfree(inode.indirect);
 	inode.indirect = 0;
 	return;
@@ -678,28 +675,27 @@ int fs_write(int inumber, const unsigned char *data, int length, int offset)
 	int old_blocks = old_file_size % BLOCK_SIZE;
 
 	int block_list_index = 0;
-	int * block_list;
 
 	if (blocks_to_allocate > old_blocks)
 	{
 		// we need to allocate more blocks
 		// pick off where its at and allocate more
-		block_list = malloc((blocks_to_allocate +1) * sizeof(int));
-		deallocate_block(INODE, block_list);
+		deallocate_block(INODE);
 	} 
 	else if (blocks_to_allocate < old_blocks)
 	{
 		// we need to deallocate all the old blocks
 		// go through all the blocks (direct + indirect)
 		// deallocate direct blocks
-		block_list = malloc((old_blocks+1) * sizeof(int));
-		deallocate_block(INODE, block_list);
+		deallocate_block(INODE);
 	}
 	else
 	{
 		// blocks are the same just write over
 	}
+	// block as deallocated, now we need to allocate new blocks
 
+	
 	// now we begin writing
 	int bytes_written = 0;
 	union fs_block buffer_block;
