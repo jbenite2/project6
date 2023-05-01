@@ -263,7 +263,7 @@ int fs_mount()
 
 	for (int i = 0; i < super_block.super.ninodeblocks; i++)
 	{
-		free_bit_map[i] = 1;
+		markused(i);
 		NFB--;
 	}
 
@@ -284,7 +284,7 @@ int fs_mount()
 			{
 				if (b.inode[j].direct[k])
 				{
-					free_bit_map[b.inode[j].direct[k]] = 1;
+					markused(b.inode[j].direct[k]);
 					NFB--;
 				}
 			}
@@ -298,7 +298,7 @@ int fs_mount()
 
 					if (indirect_block.pointers[k])
 					{
-						free_bit_map[indirect_block.pointers[k]] = 1;
+						markused(indirect_block.pointers[k]);
 						NFB--;
 					}
 					else
