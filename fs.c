@@ -49,6 +49,19 @@ int isfree(int b)
 	return ((free_bit_map[ix] & mask[b % 8]) != 0);
 }
 
+int getfreeblock()
+{
+	// printf("Searching %d blocks for a free block\n",disk_nblocks(thedisk));
+	for (int i = 0; i < disk_nblocks(thedisk); i++)
+		if (isfree(i))
+		{
+			// printf("found free block at %d\n",i);
+			return i;
+		}
+	printf("No free blocks found\n");
+	return -1;
+}
+
 int getfblockindex(struct fs_inode *inode, unsigned int blkno)
 {
 	assert(blkno < (POINTERS_PER_BLOCK + POINTERS_PER_INODE));
@@ -438,17 +451,17 @@ int fs_getsize(int inumber)
 
 int bytes_to_read(union fs_block block, int length, int offset)
 {
-	//End Case
-	if (offset < length && length < offset + BLOCK_SIZE){
-		return length-offset;
+	// End Case
+	if (offset < length && length < offset + BLOCK_SIZE)
+	{
+		return length - offset;
 	}
 
-	//Partial and full block cases
+	// Partial and full block cases
 	int BR = BLOCK_SIZE - (offset % BLOCK_SIZE);
 
 	return BR; // return total bytes
 }
-
 
 int fs_read(int inumber, unsigned char *data, int length, int offset)
 {
@@ -506,25 +519,83 @@ int fs_read(int inumber, unsigned char *data, int length, int offset)
 	{
 		int BLK = getfblockindex(&inode, offset + bytes_read);
 		disk_read(thedisk, BLK, buffer_block.data);
- 
+
 		int BTR = bytes_to_read(buffer_block, length, offset + bytes_read);
 		memcpy(data + bytes_read, buffer_block.data + changing_off, BTR);
 		bytes_read += BTR;
 	}
 
-
-
 	return bytes_read;
 }
 
-int deallocate_block(fs_block block, int block_number){
+int deallocate_block(fs_block block, int block_number)
+{
 
 	return 0;
 }
-int allocate_block(fs_block block, int block_number){
-	// not sure on params
-	return 0;
+void allocate_block(int blocks_to_allocate, fs_block block)
+{
+
+	// Loop through the direct blocks
+	// If there is a free block, return it
+	// If there is no free block, allocate a new block
+	for (int i = 0; i < POINTERS_PER_INODE; i++)
+	{
+		if (block.inode.direct[i] == 0)
+		{
+			// allocate a new block in inode
+			int new_block = getfreeblock();
+			block.direct.inode[i] = new_block;
+
+			// allocate a new block in free block map
+			free_bit_map[new_block] = 1;
+
+			// decrease the number of blocks to allocate
+			blocks_to_allocate--;
+
+			if (blocks_to_allocate == 0)
+			{
+				return;
+			}
+		}
+	}
+
+	// If there is not indirect block allocated, allocate one
+	if (block.inode.indirect == 0)
+	{
+		// allocate a new block in inode
+		int new_block = getfreeblock();
+		block.direct.inode.indirect = new_block;
+
+		// allocate a new block in free block map
+		free_bit_map[new_block] = 1;
+	}
+
+	// Loop through the indirect blocks
+	for (int i = 0; i < POINTERS_PER_BLOCK; i++)
+	{
+		if (block.inode.indirect.pointers[i] == 0)
+		{
+			// allocate a new block in inode
+			int new_block = getfreeblock();
+			block.direct.inode.indirect.pointers[i] = new_block;
+
+			// allocate a new block in free block map
+			free_bit_map[new_block] = 1;
+
+			// decrease the number of blocks to allocate
+			blocks_to_allocate--;
+
+			if (blocks_to_allocate == 0)
+			{
+				return;
+			}
+		}
+	}
+
+	return;
 }
+
 int fs_write(int inumber, const unsigned char *data, int length, int offset)
 {
 	/**
@@ -535,36 +606,46 @@ int fs_write(int inumber, const unsigned char *data, int length, int offset)
   than the number of bytes request, perhaps if the disk becomes full. If the
   given inumber is invalid, or any other error is encountered, return 0.
   **/
-	if(!is_mounted){
+
+	// 1.If file system has not been mounted, PEMAR
+	if (!is_mounted)
+	{
 		return pemar("Error: system is not mounted");
 	}
+
+	// 2.Figure out block number BLK and offset OFF of inode numbered inumber
 	int BLK = inumber / INODES_PER_BLOCK + 1;
 	int OFF = inumber % INODES_PER_BLOCK;
-	
+
 	union fs_block block;
 	disk_read(thedisk, BLK, block.data);
 	struct fs_inode INODE = block.inode[OFF];
 
-	if(! (INODE.isvalid)){
+	// Read BLK and look at the inode INODE corresponding to index inumber (use OFF to get the index)
+	// If INODE is not valid, PEMAR
+	if (!(INODE.isvalid))
+	{
 		char error[100];
 		sprintf(error, "Error: inode %d is not valid", inumber);
 		return pemar(error);
 	}
+
 	int new_file_size = length + offset;
 	int blocks_to_allocate = new_file_size % BLOCK_SIZE;
-	
+
 	int old_file_size = INODE.size;
-	int old_blocks =  old_file_size % BLOCK_SIZE;
+	int old_blocks = old_file_size % BLOCK_SIZE;
 
 	int block_list_index = 0;
 
-	if(blocks_to_allocate > old_blocks){
+	if (blocks_to_allocate > old_blocks)
+	{
 		// we need to allocate more blocks
 		int block_list[blocks_to_allocate];
 		// pick off where its at and allocate more
-
-	} 
-	else if(blocks_to_allocate < old_blocks){
+	}
+	else if (blocks_to_allocate < old_blocks)
+	{
 		// we need to deallocate all the old blocks
 		// go through all the blocks (direct + indirect)
 		// deallocate direct blocks
@@ -583,7 +664,9 @@ int fs_write(int inumber, const unsigned char *data, int length, int offset)
 		{
 			d = deallocate_block(block_del, i); // add the block number to a list of free blocks or find fresh block when reallocating
 		}
-	} else {
+	}
+	else
+	{
 		// blocks are the same just right over
 	}
 
@@ -596,7 +679,7 @@ int fs_write(int inumber, const unsigned char *data, int length, int offset)
 		// idk if this is right
 		int BLK = getfblockindex(&INODE, offset + bytes_written);
 		disk_read(thedisk, BLK, buffer_block.data);
- 
+
 		int BTR = bytes_to_read(buffer_block, length, offset + bytes_written);
 		memcpy(data + bytes_written, buffer_block.data + changing_off, BTR);
 		bytes_written += BTR;
@@ -604,5 +687,3 @@ int fs_write(int inumber, const unsigned char *data, int length, int offset)
 
 	return 0;
 }
-
-
