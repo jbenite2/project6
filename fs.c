@@ -102,6 +102,22 @@ void getfblock(struct fs_inode *inode, unsigned char *data, unsigned int fblkno,
 		*bkidx = dblkno;
 }
 
+// set the bit indicating that block b is free.
+void markfree(int b) {
+        int ix = b/8; // 8 bits per byte; this is the index of the byte to modify
+        unsigned char mask[] = { 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
+        // OR in the bit that corresponds to the block we're talking about.
+        free_bit_map[ix] |= mask[b%8];
+}
+
+// set the bit indicating that block b is used.
+void markused(int b) {
+        int ix = b/8; // 8 bits per byte; this is the index of the byte to modify
+        unsigned char mask[] = { 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
+        // AND the byte with the inverse of the bitmask to force the desired bit to 0
+        free_bit_map[ix] &= ~mask[b%8];
+}
+
 int pemar(char *message)
 {
 	fprintf(stderr, "%s\n", message);
@@ -519,7 +535,7 @@ int fs_read(int inumber, unsigned char *data, int length, int offset)
 	{
 		int BLK = getfblockindex(&inode, offset + bytes_read);
 		disk_read(thedisk, BLK, buffer_block.data);
-
+ 
 		int BTR = bytes_to_read(buffer_block, length, offset + bytes_read);
 		memcpy(data + bytes_read, buffer_block.data + changing_off, BTR);
 		bytes_read += BTR;
@@ -528,10 +544,35 @@ int fs_read(int inumber, unsigned char *data, int length, int offset)
 	return bytes_read;
 }
 
-int deallocate_block(fs_block block, int block_number)
+void deallocate_block(struct fs_inode inode, int * block_list)
 {
+	// Loop through the direct blocks
+	int block_index = 0;
+	for (int i = 0; i < 3; i++)
+	{
+		int block = inode.direct[i];
+		if (block == 0) continue;
+		block_list[block_index++] = block;
+		markfree(block);
+		inode.direct[i] = 0;
+	}
 
-	return 0;
+	// If there is an indirect block, loop through it
+	if(inode.indirect == 0) return;
+	union fs_block indirect_block;
+	disk_read(thedisk, inode.indirect, indirect_block.data);
+	for (int i = 0; i < POINTERS_PER_BLOCK; i++)
+	{
+		int block = indirect_block.pointers[i];
+		if (block == 0) continue;
+		block_list[block_index++] = block;
+		markfree(block);
+		indirect_block.pointers[i] = 0;
+	}
+	block_index[block_index++] = inode.indirect;
+	markfree(inode.indirect);
+	inode.indirect = 0;
+	return;
 }
 void allocate_block(int blocks_to_allocate, fs_block block)
 {
@@ -588,9 +629,9 @@ void allocate_block(int blocks_to_allocate, fs_block block)
 
 			if (blocks_to_allocate == 0)
 			{
-				return;
-			}
-		}
+	return;
+}
+}
 	}
 
 	return;
@@ -616,7 +657,7 @@ int fs_write(int inumber, const unsigned char *data, int length, int offset)
 	// 2.Figure out block number BLK and offset OFF of inode numbered inumber
 	int BLK = inumber / INODES_PER_BLOCK + 1;
 	int OFF = inumber % INODES_PER_BLOCK;
-
+	
 	union fs_block block;
 	disk_read(thedisk, BLK, block.data);
 	struct fs_inode INODE = block.inode[OFF];
@@ -632,42 +673,31 @@ int fs_write(int inumber, const unsigned char *data, int length, int offset)
 
 	int new_file_size = length + offset;
 	int blocks_to_allocate = new_file_size % BLOCK_SIZE;
-
+	
 	int old_file_size = INODE.size;
 	int old_blocks = old_file_size % BLOCK_SIZE;
 
 	int block_list_index = 0;
+	int * block_list;
 
 	if (blocks_to_allocate > old_blocks)
 	{
 		// we need to allocate more blocks
-		int block_list[blocks_to_allocate];
 		// pick off where its at and allocate more
-	}
+		block_list = malloc((blocks_to_allocate +1) * sizeof(int));
+		deallocate_block(INODE, block_list);
+	} 
 	else if (blocks_to_allocate < old_blocks)
 	{
 		// we need to deallocate all the old blocks
 		// go through all the blocks (direct + indirect)
 		// deallocate direct blocks
-		int block_list[old_blocks];
-		int d;
-		union fs_block block_del;
-		for (int i = 0; i < 3; i++)
-		{
-			disk_read(thedisk, INODE.direct[i], block_del.data);
-			d = deallocate_block(block_del, i); // add the block number to a list of free blocks or find fresh block when reallocating
-			block_list[block_list_index++] = d;
-		}
-		// deallocate indirect blocks
-		disk_read(thedisk, INODE.indirect, block_del.data);
-		for (int i = 0; i < BLOCK_SIZE / sizeof(int); i++)
-		{
-			d = deallocate_block(block_del, i); // add the block number to a list of free blocks or find fresh block when reallocating
-		}
+		block_list = malloc((old_blocks+1) * sizeof(int));
+		deallocate_block(INODE, block_list);
 	}
 	else
 	{
-		// blocks are the same just right over
+		// blocks are the same just write over
 	}
 
 	// now we begin writing
@@ -679,7 +709,7 @@ int fs_write(int inumber, const unsigned char *data, int length, int offset)
 		// idk if this is right
 		int BLK = getfblockindex(&INODE, offset + bytes_written);
 		disk_read(thedisk, BLK, buffer_block.data);
-
+ 
 		int BTR = bytes_to_read(buffer_block, length, offset + bytes_written);
 		memcpy(data + bytes_written, buffer_block.data + changing_off, BTR);
 		bytes_written += BTR;
