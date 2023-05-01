@@ -40,7 +40,9 @@ union fs_block
 // Global Variables
 extern struct disk *thedisk;
 int is_mounted = 0;
-unsigned char *free_bit_map = NULL;
+int *freeblock = NULL;
+
+
 
 // Provided by Flynn:
 int isfree(int b)
@@ -48,14 +50,14 @@ int isfree(int b)
 	int ix = b / 8; // 8 bits per byte; this is the byte number
 	unsigned char mask[] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
 	// if bit is set, return nonzero; else return zero
-	return ((free_bit_map[ix] & mask[b % 8]) != 0);
+	return ((freeblock[ix] & mask[b % 8]) != 0);
 }
 
 int getfreeblock()
 {
 	// printf("Searching %d blocks for a free block\n",disk_nblocks(thedisk));
 	for (int i = 0; i < disk_nblocks(thedisk); i++)
-		if (isfree(i))
+		if (freeblock[i] == 1)
 		{
 			// printf("found free block at %d\n",i);
 			return i;
@@ -111,7 +113,7 @@ void markfree(int b)
 	int ix = b / 8; // 8 bits per byte; this is the index of the byte to modify
 	unsigned char mask[] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
 	// OR in the bit that corresponds to the block we're talking about.
-	free_bit_map[ix] |= mask[b % 8];
+	freeblock[ix] |= mask[b % 8];
 }
 
 // set the bit indicating that block b is used.
@@ -120,13 +122,21 @@ void markused(int b)
 	int ix = b / 8; // 8 bits per byte; this is the index of the byte to modify
 	unsigned char mask[] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
 	// AND the byte with the inverse of the bitmask to force the desired bit to 0
-	free_bit_map[ix] &= ~mask[b % 8];
+	freeblock[ix] &= ~mask[b % 8];
 }
 
 int pemar(char *message)
 {
 	fprintf(stderr, "%s\n", message);
 	return 0;
+}
+
+void print_freeblock(){
+	// print free block
+	for(int	i = 0; i < disk_nblocks(thedisk); i++){
+		freeblock[i] ? printf("1") : printf("0");
+	}
+	printf("\n");
 }
 
 int fs_format()
@@ -238,6 +248,7 @@ void fs_debug()
 	}
 
 	printf("\n");
+	printf("\n");
 
 	return;
 }
@@ -262,22 +273,26 @@ int fs_mount()
 		return pemar("error: the filesystem has no blocks");
 	}
 
-	// free_bit_map = (int *)malloc(super_block.super.nblocks, sizeof(unsigned));
-	free_bit_map = (unsigned char *)malloc(super_block.super.nblocks / 8);
-	if (!free_bit_map)
+	// freeblock = (int *)malloc(super_block.super.nblocks, sizeof(unsigned));
+	
+	int NFB = 0;
+
+	 // build free block bitmap
+    if (freeblock) free(freeblock);
+	freeblock = (int *)malloc(super_block.super.nblocks * sizeof(int));
+	if (!freeblock)
 	{
 		exit(1);
 	}
-	int NFB = super_block.super.nblocks;
-	// super block
+    
+	// super block is not free
+	freeblock[0] = 0;
+	for (int i = 1; i < super_block.super.nblocks; i++) {
+		freeblock[i] = 1;
+		NFB++;
+	}
 
 	// scan through filesystem and mark what is in use
-
-	for (int i = 0; i < super_block.super.ninodeblocks; i++)
-	{
-		markused(i);
-		NFB--;
-	}
 
 	for (int i = 1; i < super_block.super.ninodeblocks; i++)
 	{
@@ -297,6 +312,7 @@ int fs_mount()
 				if (b.inode[j].direct[k])
 				{
 					markused(b.inode[j].direct[k]);
+					freeblock[b.inode[j].direct[k]] = 0;
 					NFB--;
 				}
 			}
@@ -311,6 +327,7 @@ int fs_mount()
 					if (indirect_block.pointers[k])
 					{
 						markused(indirect_block.pointers[k]);
+						freeblock[indirect_block.pointers[k]] = 0;
 						NFB--;
 					}
 					else
@@ -422,7 +439,8 @@ int fs_delete(int inumber)
 	{
 		if (b.inode[OFF].direct[i])
 		{
-			markfree(b.inode[OFF].direct[i]);
+			// markfree(b.inode[OFF].direct[i]);
+			freeblock[b.inode[OFF].direct[i]] = 1;
 			b.inode[OFF].direct[i] = 0;
 		}
 	}
@@ -435,19 +453,22 @@ int fs_delete(int inumber)
 		{
 			if (indirect_block.pointers[i])
 			{
-				markfree(indirect_block.pointers[i]);
+				// markfree(indirect_block.pointers[i]);
+				freeblock[indirect_block.pointers[i]] = 1;
 				indirect_block.pointers[i] = 0;
 			}
 		}
 
-		markfree(b.inode[OFF].indirect);
+		// markfree(b.inode[OFF].indirect);
+		freeblock[b.inode[OFF].indirect] = 1;
 		b.inode[OFF].indirect = 0;
 		disk_write(thedisk, b.inode[OFF].indirect, indirect_block.data);
 	}
 
 	memset(&b.inode[OFF], 0, sizeof(struct fs_inode));
 	disk_write(thedisk, BLK, b.data);
-	markfree(BLK);
+	// markfree(BLK);
+	freeblock[BLK] = 1;
 
 	return 1;
 }
@@ -558,7 +579,7 @@ int fs_read(int inumber, unsigned char *data, int length, int offset)
 	return bytes_read;
 }
 
-int allocate_block(int old_file_size, struct fs_inode INODE, int blocks_to_allocate)
+int allocate_block(int old_file_size, struct fs_inode * INODE, int blocks_to_allocate)
 {
 	// Loop through the direct blocks
 	// If there is a free block, return it
@@ -567,22 +588,23 @@ int allocate_block(int old_file_size, struct fs_inode INODE, int blocks_to_alloc
 	int blocks_allocated = 0;
 	for (int i = 0; i < POINTERS_PER_INODE && blocks_allocated < blocks_to_allocate; i++)
 	{
-		if (!INODE.direct[i])
+		if (!INODE->direct[i])
 		{
 			int new_block = getfreeblock();
 			if (new_block == -1)
 			{
 				break;
 			}
-			INODE.direct[i] = new_block;
-			markused(new_block);
+			INODE->direct[i] = new_block; 	
+			//markused(new_block);
+			freeblock[new_block] = 0;
 			blocks_allocated++;
 		}
 	}
 
 	if (blocks_allocated < blocks_to_allocate)
 	{
-		if (INODE.indirect == 0)
+		if (INODE->indirect == 0)
 		{
 			// allocate a new block in inode
 			int new_block = getfreeblock();
@@ -592,18 +614,18 @@ int allocate_block(int old_file_size, struct fs_inode INODE, int blocks_to_alloc
 			}
 			else
 			{
-				INODE.indirect = new_block;
+				INODE->indirect = new_block;
 				// allocate a new block in free block map
-				markused(new_block);
-
+				//markused(new_block);
+				freeblock[new_block] = 0;
 				union fs_block indirect_block;
 				memset(indirect_block.data, 0, BLOCK_SIZE);
-				disk_write(thedisk, INODE.indirect, indirect_block.data);
+				disk_write(thedisk, INODE->indirect, indirect_block.data);
 			}
 		}
 
 		union fs_block indirect_block;
-		disk_read(thedisk, INODE.indirect, indirect_block.data);
+		disk_read(thedisk, INODE->indirect, indirect_block.data);
 
 		// Loop through the indirect blocks
 		for (int i = 0; i < POINTERS_PER_BLOCK; i++)
@@ -620,7 +642,8 @@ int allocate_block(int old_file_size, struct fs_inode INODE, int blocks_to_alloc
 				indirect_block.pointers[i] = new_block;
 
 				// allocate a new block in inode
-				markused(new_block);
+				//markused(new_block);
+				freeblock[new_block] = 0;
 
 				// increase the number of blocks to allocate
 				blocks_allocated++;
@@ -631,9 +654,8 @@ int allocate_block(int old_file_size, struct fs_inode INODE, int blocks_to_alloc
 				}
 			}
 		}
-		disk_write(thedisk, INODE.indirect, indirect_block.data);
+		disk_write(thedisk, INODE->indirect, indirect_block.data);
 	}
-
 	return blocks_allocated;
 }
 
@@ -671,7 +693,7 @@ int fs_write(int inumber, const unsigned char *data, int length, int offset)
 	// Allocate new blocks
 	if (blocks_to_allocate)
 	{
-		allocate_block(old_file_size, INODE, blocks_to_allocate);
+		allocate_block(old_file_size, &INODE, blocks_to_allocate);
 	}
 
 	int bytes_written = 0;
