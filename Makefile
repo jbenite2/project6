@@ -1,5 +1,5 @@
 svsfs: shell.o fs.o disk.o
-	gcc shell.o fs.o disk.o -o svsfs
+	gcc shell.o fs.o disk.o -o svsfs -lm
 
 shell.o: shell.c
 	gcc -Wall shell.c -c -o shell.o -g

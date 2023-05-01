@@ -12,7 +12,7 @@
 #define INODES_PER_BLOCK 128
 #define POINTERS_PER_INODE 3
 #define POINTERS_PER_BLOCK 1024
-#define MIN(a,b) ((a)<(b)?(a):(b))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 struct fs_superblock
 {
@@ -200,6 +200,14 @@ void fs_debug()
 				strftime(ctime_str, sizeof(ctime_str), "%a %b %d %H:%M:%S %Y", ctime_tm);
 
 				printf("inode %d:\n", j);
+				if (block.inode[j].isvalid == 0)
+				{
+					printf("    valid: NO\n");
+				}
+				else
+				{
+					printf("    valid: YES\n");
+				}
 				printf("    size: %d bytes\n", block.inode[j].size);
 				printf("    created: %s\n", ctime_str);
 				printf("    direct blocks:");
@@ -550,60 +558,88 @@ int fs_read(int inumber, unsigned char *data, int length, int offset)
 	return bytes_read;
 }
 
-int allocate_block(int old_file_size, int new_file_size, struct fs_inode INODE, int blocks_to_allocate ){
-		int blocks_allocated = 0;
-		for (int i = 0; i < POINTERS_PER_INODE && blocks_allocated < blocks_to_allocate; i++) {
-			if (!INODE.direct[i]) {
-				int new_block = getfreeblock();
-				if (new_block == -1) {
-					break;
-				}
-				INODE.direct[i] = new_block;
-				markused(new_block);
-				blocks_allocated++;
+int allocate_block(int old_file_size, struct fs_inode INODE, int blocks_to_allocate)
+{
+	// Loop through the direct blocks
+	// If there is a free block, return it
+	// If there is no free block, allocate a new block
+
+	int blocks_allocated = 0;
+	for (int i = 0; i < POINTERS_PER_INODE && blocks_allocated < blocks_to_allocate; i++)
+	{
+		if (!INODE.direct[i])
+		{
+			int new_block = getfreeblock();
+			if (new_block == -1)
+			{
+				break;
 			}
+			INODE.direct[i] = new_block;
+			markused(new_block);
+			blocks_allocated++;
 		}
+	}
 
-		if (blocks_allocated < blocks_to_allocate) {
-			if (INODE.indirect == 0) {
-				int new_block = getfreeblock();
-				if (new_block == -1) {
-					blocks_to_allocate = blocks_allocated;
-				} else {
-					INODE.indirect = new_block;
-					markused(new_block);
-					union fs_block indirect_block;
-					memset(indirect_block.data, 0, BLOCK_SIZE);
-					disk_write(thedisk, INODE.indirect, indirect_block.data);
-				}
+	if (blocks_allocated < blocks_to_allocate)
+	{
+		if (INODE.indirect == 0)
+		{
+			// allocate a new block in inode
+			int new_block = getfreeblock();
+			if (new_block == -1)
+			{
+				blocks_to_allocate = blocks_allocated;
 			}
+			else
+			{
+				INODE.indirect = new_block;
+				// allocate a new block in free block map
+				markused(new_block);
 
-			if (INODE.indirect != 0) {
 				union fs_block indirect_block;
-				disk_read(thedisk, INODE.indirect, indirect_block.data);
-				for (int i = 0; i < POINTERS_PER_BLOCK && blocks_allocated < blocks_to_allocate; i++) {
-					if (indirect_block.pointers[i] == 0) {
-						int new_block = getfreeblock();
-						if (new_block == -1) {
-							break;
-						}
-						indirect_block.pointers[i] = new_block;
-						markused(new_block);
-						blocks_allocated++;
-					}
-				}
+				memset(indirect_block.data, 0, BLOCK_SIZE);
 				disk_write(thedisk, INODE.indirect, indirect_block.data);
 			}
 		}
 
-		new_file_size = MIN(new_file_size, old_file_size + blocks_allocated * BLOCK_SIZE);
+		union fs_block indirect_block;
+		disk_read(thedisk, INODE.indirect, indirect_block.data);
 
-		return blocks_allocated;
+		// Loop through the indirect blocks
+		for (int i = 0; i < POINTERS_PER_BLOCK; i++)
+		{
+			if (indirect_block.pointers[i] == 0)
+			{
+				int new_block = getfreeblock();
+
+				// no blocks available
+				if (new_block == -1)
+				{
+					break;
+				}
+				indirect_block.pointers[i] = new_block;
+
+				// allocate a new block in inode
+				markused(new_block);
+
+				// increase the number of blocks to allocate
+				blocks_allocated++;
+
+				if (blocks_allocated >= blocks_to_allocate)
+				{
+					break;
+				}
+			}
+		}
+		disk_write(thedisk, INODE.indirect, indirect_block.data);
+	}
+
+	return blocks_allocated;
 }
 
-
-int fs_write(int inumber, const unsigned char *data, int length, int offset) {
-    // 1.If file system has not been mounted, PEMAR
+int fs_write(int inumber, const unsigned char *data, int length, int offset)
+{
+	// 1.If file system has not been mounted, PEMAR
 	if (!is_mounted)
 	{
 		return pemar("Error: system is not mounted");
@@ -626,58 +662,52 @@ int fs_write(int inumber, const unsigned char *data, int length, int offset) {
 		return pemar(error);
 	}
 
-    int new_file_size = offset + length;
-    int old_file_size = INODE.size;
+	int new_file_size = offset + length;
+	int old_file_size = INODE.size;
 	int new_num_blocks = (new_file_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 	int old_num_blocks = (old_file_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 	int blocks_to_allocate = new_num_blocks - old_num_blocks;
 
-    // Allocate new blocks
-    if (blocks_to_allocate) {
-        allocate_block(old_file_size, new_file_size, INODE, blocks_to_allocate);
+	// Allocate new blocks
+	if (blocks_to_allocate)
+	{
+		allocate_block(old_file_size, INODE, blocks_to_allocate);
 	}
 
 	int bytes_written = 0;
 	int remaining_length = length;
 	int current_block = offset / BLOCK_SIZE;
-	int current_block_offset = offset % BLOCK_SIZE;
+	int changing_off = offset % BLOCK_SIZE;
 
-	while (bytes_written < length) {
+	while (bytes_written < length)
+	{
 
-    	int bytes_to_write = MIN(BLOCK_SIZE - current_block_offset, remaining_length);
+		int BTW = MIN(BLOCK_SIZE - changing_off, remaining_length);
+		union fs_block buffer_block;
+		int useBLK = getfblockindex(&INODE, current_block);
 
-    	// Read the current block
-   		union fs_block data_block;
-    	int data_block_number = getfblockindex(&INODE, current_block);
-    	if (data_block_number < 0) {
-        	printf("Error: failed to get data block index\n");
-        	break;
-    	}
+		if (BTW != BLOCK_SIZE)
+		{
+			disk_read(thedisk, useBLK, buffer_block.data);
+		}
 
-    	// If we are not overwriting the entire block, read its existing contents
-    	if (bytes_to_write != BLOCK_SIZE) {
-        	disk_read(thedisk, data_block_number, data_block.data);
-    	}
+		// Write to buffer block
+		memcpy(buffer_block.data + changing_off, data + bytes_written, BTW);
 
-    	// Copy data into the block
-    	memcpy(data_block.data + current_block_offset, data + bytes_written, bytes_to_write);
+		// Write buffer block to disk
+		disk_write(thedisk, useBLK, buffer_block.data);
 
-    	// Write the block back to disk
-    	disk_write(thedisk, data_block_number, data_block.data);
-
-    	// Update the counters
-    	bytes_written += bytes_to_write;
-    	remaining_length -= bytes_to_write;
-    	current_block++;
-    	current_block_offset = 0;
+		bytes_written += BTW;
+		remaining_length -= BTW;
+		current_block++;
+		changing_off = 0;
 	}
 
-	// Update the inode size if necessary and write it back to disk
-	if (INODE.size < new_file_size) {
-    	INODE.size = new_file_size;
-    	disk_write(thedisk, BLK, block.data);
+	if (INODE.size < new_file_size)
+	{
+		INODE.size = new_file_size;
+		disk_write(thedisk, BLK, block.data);
 	}
 
 	return bytes_written;
-
 }
