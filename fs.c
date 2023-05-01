@@ -103,19 +103,21 @@ void getfblock(struct fs_inode *inode, unsigned char *data, unsigned int fblkno,
 }
 
 // set the bit indicating that block b is free.
-void markfree(int b) {
-        int ix = b/8; // 8 bits per byte; this is the index of the byte to modify
-        unsigned char mask[] = { 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
-        // OR in the bit that corresponds to the block we're talking about.
-        free_bit_map[ix] |= mask[b%8];
+void markfree(int b)
+{
+	int ix = b / 8; // 8 bits per byte; this is the index of the byte to modify
+	unsigned char mask[] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
+	// OR in the bit that corresponds to the block we're talking about.
+	free_bit_map[ix] |= mask[b % 8];
 }
 
 // set the bit indicating that block b is used.
-void markused(int b) {
-        int ix = b/8; // 8 bits per byte; this is the index of the byte to modify
-        unsigned char mask[] = { 0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
-        // AND the byte with the inverse of the bitmask to force the desired bit to 0
-        free_bit_map[ix] &= ~mask[b%8];
+void markused(int b)
+{
+	int ix = b / 8; // 8 bits per byte; this is the index of the byte to modify
+	unsigned char mask[] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
+	// AND the byte with the inverse of the bitmask to force the desired bit to 0
+	free_bit_map[ix] &= ~mask[b % 8];
 }
 
 int pemar(char *message)
@@ -535,7 +537,7 @@ int fs_read(int inumber, unsigned char *data, int length, int offset)
 	{
 		int BLK = getfblockindex(&inode, offset + bytes_read);
 		disk_read(thedisk, BLK, buffer_block.data);
- 
+
 		int BTR = bytes_to_read(buffer_block, length, offset + bytes_read);
 		memcpy(data + bytes_read, buffer_block.data + changing_off, BTR);
 		bytes_read += BTR;
@@ -547,23 +549,26 @@ int fs_read(int inumber, unsigned char *data, int length, int offset)
 void deallocate_block(struct fs_inode inode)
 {
 	// Loop through the direct blocks
-	int block_index = 0;
+	// int block_index = 0;
 	for (int i = 0; i < 3; i++)
 	{
 		int block = inode.direct[i];
-		if (block == 0) continue;
+		if (block == 0)
+			continue;
 		markfree(block);
 		inode.direct[i] = 0;
 	}
 
 	// If there is an indirect block, loop through it
-	if(inode.indirect == 0) return;
+	if (inode.indirect == 0)
+		return;
 	union fs_block indirect_block;
 	disk_read(thedisk, inode.indirect, indirect_block.data);
 	for (int i = 0; i < POINTERS_PER_BLOCK; i++)
 	{
 		int block = indirect_block.pointers[i];
-		if (block == 0) continue;
+		if (block == 0)
+			continue;
 		markfree(block);
 		indirect_block.pointers[i] = 0;
 	}
@@ -571,19 +576,21 @@ void deallocate_block(struct fs_inode inode)
 	inode.indirect = 0;
 	return;
 }
-void allocate_block(int blocks_to_allocate, fs_block block)
+void allocate_block(int blocks_to_allocate, struct fs_inode *inode)
 {
 
 	// Loop through the direct blocks
 	// If there is a free block, return it
 	// If there is no free block, allocate a new block
+
 	for (int i = 0; i < POINTERS_PER_INODE; i++)
 	{
-		if (block.inode.direct[i] == 0)
+		if (inode->direct[i] == 0)
 		{
 			// allocate a new block in inode
+
 			int new_block = getfreeblock();
-			block.direct.inode[i] = new_block;
+			inode->direct[i] = new_block;
 
 			// allocate a new block in free block map
 			free_bit_map[new_block] = 1;
@@ -599,24 +606,27 @@ void allocate_block(int blocks_to_allocate, fs_block block)
 	}
 
 	// If there is not indirect block allocated, allocate one
-	if (block.inode.indirect == 0)
+	if (inode->indirect == 0)
 	{
 		// allocate a new block in inode
 		int new_block = getfreeblock();
-		block.direct.inode.indirect = new_block;
+		inode->indirect = new_block;
 
 		// allocate a new block in free block map
 		free_bit_map[new_block] = 1;
 	}
 
+	union fs_block indirect_block;
+	disk_read(thedisk, inode->indirect, indirect_block.data);
+
 	// Loop through the indirect blocks
-	for (int i = 0; i < POINTERS_PER_BLOCK; i++)
+	for (int i = 3; i < POINTERS_PER_BLOCK; i++)
 	{
-		if (block.inode.indirect.pointers[i] == 0)
+		if (indirect_block.pointers[i - 3] == 0)
 		{
 			// allocate a new block in inode
 			int new_block = getfreeblock();
-			block.direct.inode.indirect.pointers[i] = new_block;
+			indirect_block.pointers[i - 3] = new_block;
 
 			// allocate a new block in free block map
 			free_bit_map[new_block] = 1;
@@ -626,9 +636,14 @@ void allocate_block(int blocks_to_allocate, fs_block block)
 
 			if (blocks_to_allocate == 0)
 			{
-	return;
-}
-}
+				return;
+			}
+		}
+	}
+
+	if (inode->indirect == 1)
+	{
+		disk_write(thedisk, inode->indirect, indirect_block.data);
 	}
 
 	return;
@@ -654,7 +669,7 @@ int fs_write(int inumber, const unsigned char *data, int length, int offset)
 	// 2.Figure out block number BLK and offset OFF of inode numbered inumber
 	int BLK = inumber / INODES_PER_BLOCK + 1;
 	int OFF = inumber % INODES_PER_BLOCK;
-	
+
 	union fs_block block;
 	disk_read(thedisk, BLK, block.data);
 	struct fs_inode INODE = block.inode[OFF];
@@ -668,20 +683,19 @@ int fs_write(int inumber, const unsigned char *data, int length, int offset)
 		return pemar(error);
 	}
 
-	int new_file_size = length + offset;
+	int new_file_size = length;
 	int blocks_to_allocate = new_file_size % BLOCK_SIZE;
-	
+
 	int old_file_size = INODE.size;
 	int old_blocks = old_file_size % BLOCK_SIZE;
-
-	int block_list_index = 0;
 
 	if (blocks_to_allocate > old_blocks)
 	{
 		// we need to allocate more blocks
 		// pick off where its at and allocate more
 		deallocate_block(INODE);
-	} 
+		allocate_block(blocks_to_allocate, &INODE);
+	}
 	else if (blocks_to_allocate < old_blocks)
 	{
 		// we need to deallocate all the old blocks
@@ -689,27 +703,25 @@ int fs_write(int inumber, const unsigned char *data, int length, int offset)
 		// deallocate direct blocks
 		deallocate_block(INODE);
 	}
-	else
-	{
-		// blocks are the same just write over
-	}
-	// block as deallocated, now we need to allocate new blocks
 
-	
 	// now we begin writing
 	int bytes_written = 0;
 	union fs_block buffer_block;
+
+	int changing_blk = offset / BLOCK_SIZE;				   // inode block number
+	int changing_off = offset - changing_blk * BLOCK_SIZE; // offset in the block
+
 	// go through the blocks in the block list and write to them
 	while (bytes_written < length)
 	{
+
 		// idk if this is right
 		int BLK = getfblockindex(&INODE, offset + bytes_written);
-		disk_read(thedisk, BLK, buffer_block.data);
- 
-		int BTR = bytes_to_read(buffer_block, length, offset + bytes_written);
-		memcpy(data + bytes_written, buffer_block.data + changing_off, BTR);
-		bytes_written += BTR;
+		int BTW = bytes_to_read(buffer_block, length, offset + bytes_written);
+		memcpy(buffer_block.data + changing_off, data + bytes_written, BTW);
+		disk_write(thedisk, BLK, buffer_block.data);
+		bytes_written += BTW;
 	}
 
-	return 0;
+	return bytes_written;
 }

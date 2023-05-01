@@ -266,8 +266,10 @@ static int do_copyin(const char *filename, int inumber)
 	while (1)
 	{
 		result = fread(buffer, 1, sizeof(buffer), file);
+
 		if (result <= 0)
 			break;
+
 		if (result > 0)
 		{
 			actual = fs_write(inumber, buffer, result, offset);
